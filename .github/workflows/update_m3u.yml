@@ -1,58 +1,113 @@
-name: M3U Güncelle
+name: 🚀 M3U Listesini Güncelle
 
 on:
-  workflow_dispatch:  # Manuel çalıştırma
+  workflow_dispatch:  # Manuel çalıştırma için
   schedule:
     - cron: '0 */12 * * *'  # 12 saatte bir
 
 jobs:
-  update:
+  update-m3u:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Repoyu Klonla
+      - name: 📂 Repository'yi klonla
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
-      - name: Python Kur
-        uses: actions/setup-python@v5
+      - name: 🐍 Python 3.11 kur
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Gerekli Paketleri Kur
+      - name: 📦 Gerekli paketi kur (sadece requests)
         run: pip install requests
 
-      - name: Workers'tan Güncel Kodları İndir ve Çalıştır
+      - name: 🔐 Workers'tan Python kodunu indir (ÖZEL HEADER İLE)
         env:
           WORKERS_URL: 'https://tvheryerde-list.koprulu2.workers.dev/kodlar.txt'
         run: |
-          # Workers'dan Python kodunu indir
-          curl -s -H "User-Agent: GitHub-Actions" "$WORKERS_URL" > worker_code.py
+          echo "Workers'tan gizli Python kodunu indiriyorum..."
+          # KRİTİK: Workers'ın beklediği header'ları gönderiyoruz
+          curl -s -H "User-Agent: GitHub-Actions" \
+               -H "Referer: https://github.com/koprulu555/tvheryerde" \
+               "$WORKERS_URL" > worker_code.py
           
-          # İndirilen kodu çalıştır
+          echo "İndirilen kodun ilk satırları kontrol ediliyor..."
+          head -5 worker_code.py
+          echo "Dosya boyutu: $(wc -l < worker_code.py) satır"
+
+      - name: ▶️ İndirilen Python kodunu çalıştır (M3U oluştur)
+        id: run_python
+        continue-on-error: false
+        run: |
+          echo "Python kodunu çalıştırıyorum..."
           python worker_code.py
           
-          # Oluşan tvheryerde.m3u dosyasını kontrol et
-          if [ -f "tvheryerde.m3u" ]; then
-            echo "✅ M3U dosyası başarıyla oluşturuldu."
+          # Python çıkış kodunu kontrol et
+          if [ $? -eq 0 ]; then
+            echo "✅ Python kodu başarıyla çalıştı"
+            echo "python_result=success" >> $GITHUB_OUTPUT
           else
-            echo "❌ M3U dosyası oluşturulamadı!"
-            exit 1
+            echo "❌ Python kodu hata ile sonlandı"
+            echo "python_result=failure" >> $GITHUB_OUTPUT
+            exit 1  # Bu adımda hata varsa işlemi durdur
           fi
 
-      - name: Değişiklikleri Kontrol Et ve Pushla
+      - name: 📝 Oluşan M3U dosyasını kontrol et
+        id: check_file
+        if: steps.run_python.outputs.python_result == 'success'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -f "tvheryerde.m3u" ]; then
+            FILE_SIZE=$(wc -c < "tvheryerde.m3u" | tr -d ' ')
+            if [ $FILE_SIZE -gt 1000 ]; then
+              echo "✅ tvheryerde.m3u dosyası oluşturuldu. Boyut: $FILE_SIZE byte"
+              echo "file_exists=true" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️  Dosya oluştu ama çok küçük ($FILE_SIZE byte)."
+              echo "file_exists=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "❌ tvheryerde.m3u dosyası bulunamadı!"
+            echo "file_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 💾 Değişiklikleri kontrol et ve GitHub'a gönder
+        if: steps.check_file.outputs.file_exists == 'true'
+        run: |
+          echo "Değişiklikleri kontrol ediyorum..."
+          
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Sadece tvheryerde.m3u dosyasını ekle
+          git add tvheryerde.m3u
           
           # Değişiklik var mı kontrol et
-          if [[ -n $(git status --porcelain) ]]; then
-            git add tvheryerde.m3u
-            git commit -m "🔄 M3U listesi güncellendi"
-            git push
-            echo "✅ Değişiklikler GitHub'a pushlandı."
+          if git diff --cached --quiet; then
+            echo "ℹ️  M3U dosyasında değişiklik yok, commit atılmadı."
           else
-            echo "ℹ️  Değişiklik yok, pushlanmadı."
+            COMMIT_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+            git commit -m "🔄 M3U listesi güncellendi" \
+                       -m "Otomatik güncelleme: $COMMIT_TIME" \
+                       -m "Çalışma ID: $GITHUB_RUN_ID"
+            
+            git push
+            echo "✅ Değişiklikler GitHub'a gönderildi."
+          fi
+
+      - name: 🧹 Geçici dosyayı temizle (opsiyonel)
+        if: always()
+        run: |
+          rm -f worker_code.py
+          echo "Geçici dosyalar temizlendi."
+
+      - name: 🏁 İşlem tamamlandı
+        run: |
+          if [ "${{ steps.check_file.outputs.file_exists }}" = "true" ]; then
+            echo "🎉 M3U güncelleme işlemi başarıyla tamamlandı!"
+          else
+            echo "ℹ️  İşlem tamamlandı (M3U dosyası oluşturulamadı veya değişiklik yoktu)."
           fi
