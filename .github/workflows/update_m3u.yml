@@ -1,0 +1,58 @@
+name: M3U Güncelle
+
+on:
+  workflow_dispatch:  # Manuel çalıştırma
+  schedule:
+    - cron: '0 */12 * * *'  # 12 saatte bir
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Repoyu Klonla
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Gerekli Paketleri Kur
+        run: pip install requests
+
+      - name: Workers'tan Güncel Kodları İndir ve Çalıştır
+        env:
+          WORKERS_URL: 'https://tvheryerde-list.koprulu2.workers.dev/kodlar.txt'
+        run: |
+          # Workers'dan Python kodunu indir
+          curl -s -H "User-Agent: GitHub-Actions" "$WORKERS_URL" > worker_code.py
+          
+          # İndirilen kodu çalıştır
+          python worker_code.py
+          
+          # Oluşan tvheryerde.m3u dosyasını kontrol et
+          if [ -f "tvheryerde.m3u" ]; then
+            echo "✅ M3U dosyası başarıyla oluşturuldu."
+          else
+            echo "❌ M3U dosyası oluşturulamadı!"
+            exit 1
+          fi
+
+      - name: Değişiklikleri Kontrol Et ve Pushla
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Değişiklik var mı kontrol et
+          if [[ -n $(git status --porcelain) ]]; then
+            git add tvheryerde.m3u
+            git commit -m "🔄 M3U listesi güncellendi"
+            git push
+            echo "✅ Değişiklikler GitHub'a pushlandı."
+          else
+            echo "ℹ️  Değişiklik yok, pushlanmadı."
+          fi
